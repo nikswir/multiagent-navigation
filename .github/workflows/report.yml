@@ -24,7 +24,7 @@ jobs:
       contents: write # create/update the rolling `report` release
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compile main.tex (TeX Live)
         uses: xu-cheng/latex-action@v3
