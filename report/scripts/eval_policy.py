@@ -1,10 +1,11 @@
 """Evaluate the trained shared policy over fresh multi-robot episodes.
 
-Loads the report/assets checkpoint and rolls out the deterministic policy on
-freshly sampled episodes (8 robots each — the curated run's curriculum cap)
-to estimate per-robot arrival / collision / timeout rates. Saves the fastest
-all-arrived episode as trajectory_success.json and overwrites trajectory.json
-with a collision episode, for the report's success/failure figure.
+Loads the published checkpoint from model/ and rolls out the deterministic
+policy on freshly sampled episodes (8 robots each — the curated run's
+curriculum cap) to estimate per-robot arrival / collision / timeout rates.
+Saves the fastest all-arrived episode as trajectory_success.json and
+overwrites trajectory.json with a collision episode, for the report's
+success/failure figure.
 
     uv run python report/scripts/eval_policy.py
 """
@@ -32,6 +33,7 @@ N_ROBOTS = 8
 N_EPISODES = 100
 
 ASSETS = Path(__file__).parents[1] / "assets"
+MODEL_DIR = Path(__file__).parents[2] / "model"
 
 ########################################
 #              Checkpoint              #
@@ -39,14 +41,15 @@ ASSETS = Path(__file__).parents[1] / "assets"
 
 
 def load_report_agent(cfg: Config, device: torch.device) -> TD3:
-    """The curated report checkpoint, with a friendly missing-file hint."""
+    """The published model/ checkpoint, with a friendly missing-file hint."""
     name = cfg.train.file_name
-    if not (ASSETS / f"{name}_actor.pth").exists():
+    if not (MODEL_DIR / f"{name}_actor.pth").exists():
         raise SystemExit(
-            f"missing checkpoint {ASSETS / name}_actor.pth — run "
-            "`uv run python report/scripts/run_experiment.py` first",
+            f"missing checkpoint {MODEL_DIR / name}_actor.pth — train with "
+            "`uv run python report/scripts/run_experiment.py` and copy the "
+            "chosen epoch's weights into model/",
         )
-    return load_agent(cfg, device, ASSETS)
+    return load_agent(cfg, device, MODEL_DIR)
 
 
 ########################################

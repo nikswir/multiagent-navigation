@@ -32,16 +32,16 @@ from multiagent_navigation.lib import make_env, load_agent, select_device
 
 SEED = 29
 N_ROBOTS = 4
-N_EPISODES = 6
+N_EPISODES = 5
 MAX_STEPS = 200
 MAX_TRIES = 200
-FRAME_STRIDE = 3
-HOLD_LAST = 8
-FRAME_MS = 90
-DPI = 110
+FRAME_STRIDE = 4
+HOLD_LAST = 6
+FRAME_MS = 110
+DPI = 90
 
 OUT = Path(__file__).parents[2] / "docs" / "assets" / "demo.gif"
-ASSETS = Path(__file__).parents[1] / "assets"
+MODEL_DIR = Path(__file__).parents[2] / "model"
 
 INK = "#27324a"
 MUTED = "#6b7896"
@@ -52,14 +52,15 @@ MUTED = "#6b7896"
 
 
 def load_report_agent(cfg: Config, device: torch.device) -> TD3:
-    """The curated report checkpoint, with a friendly missing-file hint."""
+    """The published model/ checkpoint, with a friendly missing-file hint."""
     name = cfg.train.file_name
-    if not (ASSETS / f"{name}_actor.pth").exists():
+    if not (MODEL_DIR / f"{name}_actor.pth").exists():
         raise SystemExit(
-            f"missing checkpoint {ASSETS / name}_actor.pth — run "
-            "`uv run python report/scripts/run_experiment.py` first",
+            f"missing checkpoint {MODEL_DIR / name}_actor.pth — train with "
+            "`uv run python report/scripts/run_experiment.py` and copy the "
+            "chosen epoch's weights into model/",
         )
-    return load_agent(cfg, device, ASSETS)
+    return load_agent(cfg, device, MODEL_DIR)
 
 
 ########################################
