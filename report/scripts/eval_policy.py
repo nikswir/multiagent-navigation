@@ -95,16 +95,18 @@ def main() -> None:
         "timeout": counts["timeout"],
         "rate": rate,
     }
-    (ASSETS / "eval_stats.json").write_text(json.dumps(stats))
+    (ASSETS / "eval_stats.json").write_text(json.dumps(stats) + "\n")
 
     if best is not None:
-        (ASSETS / "trajectory_success.json").write_text(json.dumps(best))
+        (ASSETS / "trajectory_success.json").write_text(
+            json.dumps(best) + "\n",
+        )
         print(f"saved all-arrived episode ({best_steps} steps)")
     else:
         print("no all-arrived episode captured")
 
     if worst is not None:
-        (ASSETS / "trajectory.json").write_text(json.dumps(worst))
+        (ASSETS / "trajectory.json").write_text(json.dumps(worst) + "\n")
         print("saved collision episode")
 
 
