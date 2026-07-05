@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.json
+htmlcov/
+
+# Mutation testing
+mutants/
+.mutmut-cache
+html/
+
+# Hydra / experiment outputs
+outputs/
+multirun/
+
+# ML artifacts
+*.ckpt
+*.pt
+*.pth
+wandb/
+
+# Regenerable training outputs (curated copies live in report/assets/)
+results/
+pytorch_models/
+
+# Machine-local agent permissions (never shared; settings.json is)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Report PDF — built by CI (.github/workflows/report.yml), not committed
+report/main.pdf

@@ -1,0 +1,16 @@
+# Main config — the `defaults` list COMPOSES a run from sub-config groups.
+#
+# Each `- group: option` line pulls configs/<group>/<option>.yaml into the run.
+#   - config_schema : the typed contract from config_schema.py; type-checks the
+#                     composed result and rejects unknown fields at startup.
+#   - <group>: <opt>: one entry per concern — add a line per group.
+#   - _self_        : lets this file's own keys override the groups.
+#
+# Override on the CLI:  group=other_option   or   group.field=value
+defaults:
+  - config_schema
+  - env: default
+  - model: default
+  - train: default
+  - animate: default
+  - _self_

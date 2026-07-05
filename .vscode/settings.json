@@ -1,0 +1,14 @@
+{
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    "markdown.math.enabled": true,
+    "[markdown]": {
+      "editor.formatOnSave": false
+    },
+    "editor.inlayHints.enabled": "off",
+    "python.analysis.inlayHints.variableTypes": false,
+    "python.analysis.inlayHints.functionReturnTypes": false,
+    "python.analysis.inlayHints.callArgumentNames": "off",
+    "python.analysis.inlayHints.pytestParameters": false,
+    "python.terminal.activateEnvironment": false
+  }

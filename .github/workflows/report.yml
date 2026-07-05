@@ -1,0 +1,54 @@
+name: Report
+# Builds report/main.tex with TeX Live so the PDF never lives in git.
+# PRs get the PDF as a build artifact (proof the source compiles); pushes
+# to main also refresh the rolling `report` release, which serves the
+# stable download URL the README links to:
+#   https://github.com/nikswir/multiagent-navigation/releases/download/report/main.pdf
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "report/**"
+      - ".github/workflows/report.yml"
+  pull_request:
+    paths:
+      - "report/**"
+      - ".github/workflows/report.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create/update the rolling `report` release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile main.tex (TeX Live)
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: main.tex
+          working_directory: report
+
+      # On PRs the artifact is the review copy — download it from the run page.
+      - name: Upload the PDF as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report/main.pdf
+          if-no-files-found: error
+
+      # The `report` tag is a rolling release: one fixed URL, always the
+      # latest build from main. `--clobber` replaces the previous asset.
+      - name: Refresh the rolling release (main only)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view report --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create report --repo "$GITHUB_REPOSITORY" \
+              --title "Report (latest build)" \
+              --notes "PDF compiled by CI from report/main.tex on every push to main."
+          gh release upload report report/main.pdf --repo "$GITHUB_REPOSITORY" --clobber

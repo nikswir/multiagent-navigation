@@ -1,0 +1,13 @@
+# A `model` option — must satisfy ModelConfig in config_schema.py.
+action_dim: 2
+max_action: 1.0
+actor_lr: 1.0e-4
+critic_lr: 5.0e-4
+hidden1: 800
+hidden2: 600
+discount: 0.9999
+tau: 0.005
+policy_noise: 0.2
+noise_clip: 0.5
+policy_freq: 2
+batch_size: 256

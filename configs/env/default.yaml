@@ -1,0 +1,19 @@
+# An `env` option — must satisfy EnvConfig in config_schema.py.
+# max_robots is the env's array CAPACITY; the active robot count per episode
+# comes from train.n_robots (curriculum cap) or animate.n_robots.
+world_width: 10.0
+world_height: 10.0
+environment_dim: 20
+robot_radius: 0.25
+max_steps: 500
+max_robots: 16
+time_delta: 0.1
+goal_reached_dist: 0.3
+lidar_max_range: 5.0
+# (x, y, width, height) axis-aligned rectangles. Rewards are fixed in
+# SimpleEnv.get_reward: +100 goal / -100 collision / -0.05 per-step penalty.
+obstacle_definitions:
+  - [-3.0, 1.0, 1.0, 2.0]
+  - [1.0, -2.0, 2.0, 1.0]
+  - [-1.0, -3.0, 3.0, 0.5]
+  - [2.0, 2.0, 0.5, 3.0]
