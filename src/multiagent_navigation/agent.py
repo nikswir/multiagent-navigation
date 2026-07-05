@@ -3,9 +3,11 @@
 Twin Delayed DDPG as driven by the training loop in `lib`: a tanh-bounded
 Actor, a twin Critic (two Q heads taking state and action), target networks
 hard-copied at construction and soft-updated (Polyak `tau`) every
-`policy_freq` iterations, and clipped smoothing noise on the replayed target
-actions. Tensors are routed through the `device` handed to `TD3` — device
-*selection* lives in the entry points (`run`, `viz`), never in here.
+`policy_freq` critic updates — counted by a persistent `total_it`, so the
+cadence survives across `train()` calls and episode lengths — and clipped
+smoothing noise on the replayed target actions. Tensors are routed through
+the `device` handed to `TD3` — device *selection* lives in the entry points
+(`run`, `viz`), never in here.
 """
 
 from __future__ import annotations
@@ -76,22 +78,14 @@ class Critic(nn.Module):
         s: torch.Tensor,
         a: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # ── Q1: state/action mixed via the hidden weights directly ──
+        # ── Q1: state and action projected then mixed additively ──
         s1 = F.relu(self.layer_1(s))
-        self.layer_2_s(s1)
-        self.layer_2_a(a)
-        s11 = torch.mm(s1, self.layer_2_s.weight.data.t())
-        s12 = torch.mm(a, self.layer_2_a.weight.data.t())
-        s1 = F.relu(s11 + s12 + self.layer_2_a.bias.data)
+        s1 = F.relu(self.layer_2_s(s1) + self.layer_2_a(a))
         q1 = self.layer_3(s1)
 
         # ── Q2: same mixing with the second head's weights ──
         s2 = F.relu(self.layer_4(s))
-        self.layer_5_s(s2)
-        self.layer_5_a(a)
-        s21 = torch.mm(s2, self.layer_5_s.weight.data.t())
-        s22 = torch.mm(a, self.layer_5_a.weight.data.t())
-        s2 = F.relu(s21 + s22 + self.layer_5_a.bias.data)
+        s2 = F.relu(self.layer_5_s(s2) + self.layer_5_a(a))
         q2 = self.layer_6(s2)
         return q1, q2
 
@@ -152,16 +146,55 @@ class TD3:
 
         self.max_action = max_action
         self.iter_count = 0
+        self.total_it = 0
 
     def get_action(self, state: np.ndarray) -> np.ndarray:
         """The deterministic policy action for a single flat state."""
-        s = torch.Tensor(state.reshape(1, -1)).to(self.device)
-        action: np.ndarray = self.actor(s).cpu().data.numpy().flatten()
+        action: np.ndarray = self.get_actions(state.reshape(1, -1))[0]
         return action
+
+    def get_actions(self, states: np.ndarray) -> np.ndarray:
+        """One batched forward for a stack of states — (n, state_dim) in,
+        (n, action_dim) out. Callers with several robots use this instead
+        of n batch-1 round trips."""
+        s = torch.Tensor(np.asarray(states)).to(self.device)
+        with torch.no_grad():
+            actions: np.ndarray = self.actor(s).cpu().numpy()
+        return actions
 
     ########################################
     #           Training update            #
     ########################################
+
+    def compute_target_q(
+        self,
+        next_state: torch.Tensor,
+        reward: torch.Tensor,
+        done: torch.Tensor,
+        discount: float,
+        policy_noise: float,
+        noise_clip: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """The clipped double-Q Bellman target (and the raw min-Q term).
+
+        target = r + (1 - done) * discount * min(Q1', Q2') over the target
+        policy's action smoothed with clipped Gaussian noise. Exposed as its
+        own method so the Bellman arithmetic is directly testable.
+        """
+        next_action = self.actor_target(next_state)
+        noise = (torch.randn_like(next_action) * policy_noise).clamp(
+            -noise_clip,
+            noise_clip,
+        )
+        next_action = (next_action + noise).clamp(
+            -self.max_action,
+            self.max_action,
+        )
+
+        target_q1, target_q2 = self.critic_target(next_state, next_action)
+        min_q = torch.min(target_q1, target_q2)
+        target_q = (reward + (1 - done) * discount * min_q).detach()
+        return target_q, min_q
 
     def train(
         self,
@@ -179,8 +212,9 @@ class TD3:
         max_q = float("-inf")
         av_critic_loss = 0.0
         av_actor_loss = 0.0
+        actor_updates = 0
 
-        for it in range(iterations):
+        for _ in range(iterations):
             # ── 1. Sample a batch: (s, a, r, t, s2) column order ──
             (
                 batch_states,
@@ -196,27 +230,19 @@ class TD3:
             reward = torch.Tensor(batch_rewards).to(self.device)
             done = torch.Tensor(batch_dones).to(self.device)
 
-            # ── 2. Target action with clipped smoothing noise ──
-            next_action = self.actor_target(next_state)
-            noise = (
-                torch.Tensor(batch_actions)
-                .data.normal_(0, policy_noise)
-                .to(self.device)
+            # ── 2. Clipped double-Q Bellman target ──
+            target_q, min_q = self.compute_target_q(
+                next_state,
+                reward,
+                done,
+                discount,
+                policy_noise,
+                noise_clip,
             )
-            noise = noise.clamp(-noise_clip, noise_clip)
-            next_action = (next_action + noise).clamp(
-                -self.max_action,
-                self.max_action,
-            )
+            av_q += torch.mean(min_q).item()
+            max_q = max(max_q, torch.max(min_q).item())
 
-            # ── 3. Clipped double-Q target ──
-            target_q1, target_q2 = self.critic_target(next_state, next_action)
-            target_q = torch.min(target_q1, target_q2)
-            av_q += torch.mean(target_q).item()
-            max_q = max(max_q, torch.max(target_q).item())
-            target_q = reward + ((1 - done) * discount * target_q).detach()
-
-            # ── 4. Critic update on both heads ──
+            # ── 3. Critic update on both heads ──
             current_q1, current_q2 = self.critic(state, action)
             loss = F.mse_loss(current_q1, target_q) + F.mse_loss(
                 current_q2,
@@ -226,18 +252,19 @@ class TD3:
             loss.backward()
             self.critic_optimizer.step()
 
-            # ── 5. Delayed actor update + Polyak target updates ──
-            if it % policy_freq == 0:
-                actor_grad, _ = self.critic(state, self.actor(state))
-                actor_grad = -actor_grad.mean()
+            # ── 4. Delayed actor update + Polyak target updates, on a
+            #    persistent cadence: every policy_freq-th critic update ──
+            self.total_it += 1
+            if self.total_it % policy_freq == 0:
+                actor_loss = -self.critic(state, self.actor(state))[0].mean()
                 self.actor_optimizer.zero_grad()
-                actor_grad.backward()
+                actor_loss.backward()
                 self.actor_optimizer.step()
 
                 for param, target_param in zip(
                     self.actor.parameters(),
                     self.actor_target.parameters(),
-                    strict=False,
+                    strict=True,
                 ):
                     target_param.data.copy_(
                         tau * param.data + (1 - tau) * target_param.data,
@@ -246,12 +273,14 @@ class TD3:
                 for param, target_param in zip(
                     self.critic.parameters(),
                     self.critic_target.parameters(),
-                    strict=False,
+                    strict=True,
                 ):
                     target_param.data.copy_(
                         tau * param.data + (1 - tau) * target_param.data,
                     )
-                av_actor_loss += actor_grad.item()
+
+                av_actor_loss += actor_loss.item()
+                actor_updates += 1
 
             av_critic_loss += loss.item()
 
@@ -259,8 +288,8 @@ class TD3:
 
         # ── One diagnostics line per call ──
         avg_actor_loss = (
-            round(av_actor_loss / (iterations // policy_freq), 4)
-            if iterations >= policy_freq
+            round(av_actor_loss / actor_updates, 4)
+            if actor_updates
             else float("nan")
         )
         print(
@@ -287,6 +316,13 @@ class TD3:
         )
 
     def load(self, filename: str, directory: str | Path) -> None:
+        """Load online nets and hard-copy them into the targets.
+
+        Target networks and optimizer state are not checkpointed; syncing
+        the targets to the loaded weights (exactly as `__init__` does)
+        keeps a resumed run's Bellman targets consistent instead of
+        bootstrapping from randomly-initialized target nets.
+        """
         # ── map_location keeps checkpoints loadable on any device ──
         self.actor.load_state_dict(
             torch.load(
@@ -300,3 +336,5 @@ class TD3:
                 map_location=self.device,
             ),
         )
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.critic_target.load_state_dict(self.critic.state_dict())

@@ -3,14 +3,13 @@
 Assert real invariants over generated inputs rather than hand-picked cases:
 the pure reward function's terminal values and step formula, the actor's tanh
 bound, the environment's 24-d reset contract over random layouts, and the
-replay buffer's batch shapes. `SimpleEnv` has no seed parameter, so each test
-seeds the global RNGs inline.
+replay buffer's batch shapes. Layout randomness is env-owned: the generated
+`seed` goes straight into `SimpleEnv(seed=...)`.
 """
 
 from __future__ import annotations
 
 import math
-import random
 
 import torch
 import pytest
@@ -120,13 +119,12 @@ def test_actor_output_is_within_tanh_bounds(state: list[float]) -> None:
 )
 def test_reset_returns_bounded_24d_states(seed: int, n_robots: int) -> None:
     """A reset yields one finite 24-d state per active robot."""
-    random.seed(seed)
-    np.random.seed(seed)
     env = SimpleEnv(
         robot_radius=0.25,
         max_steps=50,
         n_robots=n_robots,
         max_robots=4,
+        seed=seed,
     )
 
     states = env.reset(n_robots=n_robots)

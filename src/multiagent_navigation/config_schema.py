@@ -68,16 +68,17 @@ class ModelConfig:
 class TrainConfig:
     """Training schedule, exploration decay, curriculum and checkpoints.
 
-    `expl_noise` is the INITIAL exploration noise — it decays at runtime
-    toward `expl_min` over `expl_decay_steps`. `n_robots` is the curriculum's
+    `expl_noise` is the INITIAL exploration noise — it anneals linearly to
+    `expl_min` over `expl_decay_steps`. `n_robots` is the curriculum's
     active-robot cap (reached after `max_robots_timestamp` timesteps).
+    Episode length is owned by the env (`env.max_steps`); there is no
+    separate training-side cap.
     """
 
     seed: int = 10
     max_timesteps: int = 1_000_000
     eval_freq: int = 5000
     eval_ep: int = 100
-    max_ep: int = 500
     expl_noise: float = 1.0
     expl_min: float = 0.1
     expl_decay_steps: int = 500_000
@@ -92,7 +93,13 @@ class TrainConfig:
 
 @dataclass
 class AnimateConfig:
-    """Animation playback and the artifact paths shared with training."""
+    """Animation playback and the artifact paths shared with training.
+
+    `run_dir` points at ONE training-run directory (the Hydra output dir or
+    a repo-root layout) from which `results/` and `pytorch_models/` are
+    derived; when empty, `viz` falls back to `results_dir`/`models_dir`
+    relative to the CWD and then to the newest `outputs/` run.
+    """
 
     n_robots: int = 10
     max_steps: int = 200
@@ -100,6 +107,7 @@ class AnimateConfig:
     fig_width: float = 8.0
     fig_height: float = 8.0
     seed: int = 1
+    run_dir: str = ""
     results_dir: str = "results"
     models_dir: str = "pytorch_models"
     report_csv: str = "report.csv"

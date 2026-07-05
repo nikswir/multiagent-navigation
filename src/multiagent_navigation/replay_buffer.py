@@ -1,8 +1,11 @@
 """Experience replay buffer for off-policy TD3 training.
 
-A FIFO ring over a deque of (state, action, reward, done, next_state) tuples —
-note that `done` comes BEFORE `next_state`, and `sample_batch` returns column
-arrays in that same order. Based on Patrick Emami's implementation.
+A FIFO ring over a plain list of (state, action, reward, done, next_state)
+tuples — note that `done` comes BEFORE `next_state`, and `sample_batch`
+returns column arrays in that same order. A list gives O(1) indexing, so
+uniform sampling stays cheap at full capacity (a deque would pay O(n) per
+pick). Sampling uses a private `random.Random(seed)` — constructing a buffer
+never touches module-global RNG state.
 """
 
 from __future__ import annotations
@@ -10,8 +13,6 @@ from __future__ import annotations
 import random
 
 import numpy as np
-
-from collections import deque
 
 # The stored transition: (s, a, r, t, s2) — done before next-state.
 Experience = tuple[np.ndarray, np.ndarray, float, int, np.ndarray]
@@ -22,13 +23,13 @@ Experience = tuple[np.ndarray, np.ndarray, float, int, np.ndarray]
 
 
 class ReplayBuffer:
-    """The right side of the deque holds the most recent experiences."""
+    """A fixed-capacity FIFO ring: the write cursor overwrites the oldest."""
 
     def __init__(self, buffer_size: int, random_seed: int = 123) -> None:
         self.buffer_size = buffer_size
-        self.count = 0
-        self.buffer: deque[Experience] = deque()
-        random.seed(random_seed)
+        self.buffer: list[Experience] = []
+        self.rng = random.Random(random_seed)
+        self._cursor = 0
 
     def add(
         self,
@@ -39,25 +40,22 @@ class ReplayBuffer:
         s2: np.ndarray,
     ) -> None:
         experience = (s, a, r, t, s2)
-        if self.count < self.buffer_size:
+        if len(self.buffer) < self.buffer_size:
             self.buffer.append(experience)
-            self.count += 1
         else:
-            self.buffer.popleft()
-            self.buffer.append(experience)
+            # ── Ring is full: overwrite the oldest entry in place ──
+            self.buffer[self._cursor] = experience
+            self._cursor = (self._cursor + 1) % self.buffer_size
 
     def size(self) -> int:
-        return self.count
+        return len(self.buffer)
 
     def sample_batch(
         self,
         batch_size: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Uniform sample of min(count, batch_size) stored transitions."""
-        if self.count < batch_size:
-            batch = random.sample(self.buffer, self.count)
-        else:
-            batch = random.sample(self.buffer, batch_size)
+        """Uniform sample of min(size, batch_size) stored transitions."""
+        batch = self.rng.sample(self.buffer, min(len(self.buffer), batch_size))
 
         # ── Column-wise batches; rewards / dones as (k, 1) columns ──
         s_batch = np.array([_[0] for _ in batch])
@@ -70,4 +68,4 @@ class ReplayBuffer:
 
     def clear(self) -> None:
         self.buffer.clear()
-        self.count = 0
+        self._cursor = 0

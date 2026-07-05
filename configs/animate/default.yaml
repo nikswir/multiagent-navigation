@@ -1,13 +1,16 @@
-# An `animate` option — must satisfy AnimateConfig in config_schema.py.
-# results_dir / models_dir / file_name (train group) form the checkpoint
-# contract shared with training: viz loads the best epoch found in
-# {results_dir}/{file_name} and weights {models_dir}/{file_name}_epoch-{N}.
+# An `animate` option — must satisfy AnimateConfig in config_schema.py, and
+# these defaults must stay EQUAL to the schema's (test_config_sync pins it,
+# so the two sources can never drift silently).
+# run_dir points at ONE training run to replay; when empty, viz falls back
+# to results_dir/models_dir relative to the CWD, then to the newest
+# outputs/ run. file_name (train group) completes the checkpoint contract.
 n_robots: 10
 max_steps: 200
 interval: 50
 fig_width: 8.0
 fig_height: 8.0
 seed: 1
+run_dir: ""
 results_dir: results
 models_dir: pytorch_models
 report_csv: report.csv
