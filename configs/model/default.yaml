@@ -1,4 +1,6 @@
-# A `model` option — must satisfy ModelConfig in config_schema.py.
+# A `model` option — must satisfy ModelConfig in config_schema.py, and these
+# defaults must stay EQUAL to the schema's (test_config_sync pins it, so the
+# two sources can never drift silently).
 action_dim: 2
 max_action: 1.0
 actor_lr: 1.0e-4

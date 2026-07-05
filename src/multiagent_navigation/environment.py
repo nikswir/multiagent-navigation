@@ -7,6 +7,12 @@ lidar ranges plus normalized distance / relative angle to its goal and its own
 linear & angular velocity — and is rewarded +100 for reaching the goal, -100
 for any collision, and a shaped step reward otherwise (`get_reward`).
 
+Actions are raw policy outputs in [-1, 1]^2: `step` remaps the throttle to a
+forward-only speed v = (a0 + 1) / 2 itself, so no caller ever remaps. The env
+owns termination completely (goal / collision / `max_steps`), returns fresh
+list copies from `step`, and draws all episode randomness from its own
+seeded `random.Random` — never from module-global state.
+
 `max_robots` is the env's *capacity* (internal arrays are sized to it); the
 *active* robot count is chosen per episode via `reset(n_robots=...)` — the
 training curriculum in `lib` ramps it up over time.
@@ -25,11 +31,14 @@ from collections.abc import Sequence
 #              Constants               #
 ########################################
 
+# Kept in sync with `config_schema.EnvConfig` — the schema is the source of
+# truth for configured runs; these mirror it for bare constructions.
 GOAL_REACHED_DIST = 0.3
 TIME_DELTA = 0.1
-ROBOT_RADIUS = 0.15
+ROBOT_RADIUS = 0.25
 LIDAR_MAX_RANGE = 5.0
 MAX_ROBOTS = 16
+MAX_STEPS = 500
 
 # The default obstacle course: (x, y, width, height) rectangles.
 DEFAULT_OBSTACLES: list[list[float]] = [
@@ -38,6 +47,18 @@ DEFAULT_OBSTACLES: list[list[float]] = [
     [-1, -3, 3, 0.5],
     [2, 2, 0.5, 3],
 ]
+
+# Attempt cap for the rejection sampling of starts and goals: fail loudly
+# instead of hanging forever on an unsatisfiable layout.
+MAX_SAMPLE_TRIES = 1000
+
+# Human-readable labels for the terminal `info["reason"]` values — the one
+# place the reason strings are mapped, imported by the report scripts.
+OUTCOME_LABELS = {
+    "target_reached": "arrived",
+    "collision": "collision",
+    "max_steps_reached": "timeout",
+}
 
 ########################################
 #          Obstacles & world           #
@@ -58,7 +79,14 @@ class Obstacle:
         self.y = y
         self.width = width
         self.height = height
-        self.rect = (x, y, width, height)
+
+        # ── The four boundary segments, precomputed once ──
+        self.sides = [
+            ((x, y), (x + width, y)),
+            ((x + width, y), (x + width, y + height)),
+            ((x + width, y + height), (x, y + height)),
+            ((x, y + height), (x, y)),
+        ]
 
     def intersects_segment(
         self,
@@ -69,23 +97,9 @@ class Obstacle:
         x1, y1 = p1
         x2, y2 = p2
 
-        # ── The rectangle as its four boundary segments ──
-        sides = [
-            ((self.x, self.y), (self.x + self.width, self.y)),
-            (
-                (self.x + self.width, self.y),
-                (self.x + self.width, self.y + self.height),
-            ),
-            (
-                (self.x + self.width, self.y + self.height),
-                (self.x, self.y + self.height),
-            ),
-            ((self.x, self.y + self.height), (self.x, self.y)),
-        ]
-
         min_dist_to_intersection = float("inf")
 
-        for (sx1, sy1), (sx2, sy2) in sides:
+        for (sx1, sy1), (sx2, sy2) in self.sides:
             # ── Parametric segment-segment intersection ──
             den = (x1 - x2) * (sy1 - sy2) - (y1 - y2) * (sx1 - sx2)
             if den == 0:
@@ -196,6 +210,19 @@ class Robot:
         self.x += self.linear_velocity * math.cos(self.theta) * dt
         self.y += self.linear_velocity * math.sin(self.theta) * dt
 
+    def beam_angle(self, i: int) -> float:
+        """Beam `i`'s angle relative to the heading — the ONE fan formula.
+
+        Shared by the scan itself and by every renderer, so drawn rays can
+        never drift from what the lidar actually measured.
+        """
+        if self.lidar_num_beams == 1:
+            return self.lidar_start_angle_offset + 0.5 * self.lidar_fov
+        return (
+            self.lidar_start_angle_offset
+            + (i / (self.lidar_num_beams - 1)) * self.lidar_fov
+        )
+
     def intersects_segment(
         self,
         p1: tuple[float, float],
@@ -209,6 +236,8 @@ class Robot:
         vec_x = x2 - x1
         vec_y = y2 - y1
         segment_length = math.sqrt(vec_x**2 + vec_y**2)
+        if segment_length == 0:
+            return None
         ray_dx = vec_x / segment_length
         ray_dy = vec_y / segment_length
 
@@ -248,16 +277,7 @@ class Robot:
 
         for i in range(self.lidar_num_beams):
             # ── 1. Beam endpoint at max range in world coordinates ──
-            if self.lidar_num_beams == 1:
-                relative_beam_angle = (
-                    self.lidar_start_angle_offset + 0.5 * self.lidar_fov
-                )
-            else:
-                relative_beam_angle = (
-                    self.lidar_start_angle_offset
-                    + (i / (self.lidar_num_beams - 1)) * self.lidar_fov
-                )
-            global_beam_angle = self.theta + relative_beam_angle
+            global_beam_angle = self.theta + self.beam_angle(i)
             x_end_far = self.x + self.lidar_max_range * math.cos(
                 global_beam_angle,
             )
@@ -290,8 +310,10 @@ class Robot:
 
             scan_data[i] = min_dist_to_obstacle
 
-        # ── Body-relative readings; raw distances kept for display ──
-        self.current_lidar_data = scan_data - self.radius
+        # ── Body-relative readings (floored at 0 — a surface inside the
+        #    disc is a collision, not a negative range); raw kept for
+        #    display ──
+        self.current_lidar_data = np.maximum(scan_data - self.radius, 0.0)
         self.current_lidar_data_display = scan_data
 
         return self.current_lidar_data
@@ -322,13 +344,14 @@ class SimpleEnv:
         world_height: float = 10,
         environment_dim: int = 20,
         robot_radius: float = ROBOT_RADIUS,
-        max_steps: int = 200,
+        max_steps: int = MAX_STEPS,
         n_robots: int = MAX_ROBOTS,
         max_robots: int = MAX_ROBOTS,
         time_delta: float = TIME_DELTA,
         goal_reached_dist: float = GOAL_REACHED_DIST,
         lidar_max_range: float = LIDAR_MAX_RANGE,
         obstacle_definitions: Sequence[Sequence[float]] | None = None,
+        seed: int | None = None,
     ) -> None:
         if obstacle_definitions is None:
             obstacle_definitions = DEFAULT_OBSTACLES
@@ -337,6 +360,9 @@ class SimpleEnv:
         self.max_robots = max_robots
         self.time_delta = time_delta
         self.goal_reached_dist = goal_reached_dist
+
+        # ── Env-owned randomness: never touches module-global state ──
+        self.rng = random.Random(seed)
 
         # ── Arrays are sized to capacity; episodes use the first n ──
         self.world = World(world_width, world_height, obstacle_definitions)
@@ -391,26 +417,33 @@ class SimpleEnv:
 
     def set_random_goal(self) -> None:
         for i in range(self.n_robots):
-            while True:
-                self.goals_x[i] = random.uniform(
+            for _ in range(MAX_SAMPLE_TRIES):
+                self.goals_x[i] = self.rng.uniform(
                     -self.world.width / 2 * 0.8,
                     self.world.width / 2 * 0.8,
                 )
-                self.goals_y[i] = random.uniform(
+                self.goals_y[i] = self.rng.uniform(
                     -self.world.height / 2 * 0.8,
                     self.world.height / 2 * 0.8,
                 )
 
+                # ── Robot-sized clearance, so the goal is standable ──
                 if not self._is_position_valid(
                     self.goals_x[i],
                     self.goals_y[i],
-                    0.05,
+                    self.robots[i].radius,
                 ):
                     continue
 
+                # ── Not already reached by robot i's start pose ──
+                dist_to_start = math.hypot(
+                    self.goals_x[i] - self.robots[i].x,
+                    self.goals_y[i] - self.robots[i].y,
+                )
+                if dist_to_start < self.goal_reached_dist:
+                    continue
+
                 # ── Keep goals mutually separated by the body radii ──
-                if i == 0:
-                    break
                 repeat = False
                 for j in range(i):
                     dist = math.sqrt(
@@ -421,19 +454,24 @@ class SimpleEnv:
                         repeat = True
                 if not repeat:
                     break
+            else:
+                raise RuntimeError(
+                    f"no valid goal found for robot {i} after "
+                    f"{MAX_SAMPLE_TRIES} tries — layout too crowded",
+                )
 
     def set_random_start_pos(self) -> None:
         for i in range(self.n_robots):
-            while True:
-                self.robots[i].x = random.uniform(
+            for _ in range(MAX_SAMPLE_TRIES):
+                self.robots[i].x = self.rng.uniform(
                     -self.world.width / 2 * 0.8,
                     self.world.width / 2 * 0.8,
                 )
-                self.robots[i].y = random.uniform(
+                self.robots[i].y = self.rng.uniform(
                     -self.world.height / 2 * 0.8,
                     self.world.height / 2 * 0.8,
                 )
-                self.robots[i].theta = random.uniform(-math.pi, math.pi)
+                self.robots[i].theta = self.rng.uniform(-math.pi, math.pi)
 
                 if self._is_position_valid(
                     self.robots[i].x,
@@ -442,6 +480,11 @@ class SimpleEnv:
                     i,
                 ):
                     break
+            else:
+                raise RuntimeError(
+                    f"no valid start found for robot {i} after "
+                    f"{MAX_SAMPLE_TRIES} tries — layout too crowded",
+                )
 
     def reset(self, n_robots: int | None = None) -> list[np.ndarray]:
         """Start a fresh episode with `n_robots` active robots."""
@@ -514,26 +557,39 @@ class SimpleEnv:
         list[bool],
         list[dict[str, bool | str] | None],
     ]:
-        """Advance every active robot one tick; done robots are skipped."""
+        """Advance every active robot one tick; done robots are skipped.
+
+        `action[i]` is the raw policy output (throttle, steering) in
+        [-1, 1]^2; the throttle is remapped HERE to a forward-only speed
+        v = (a0 + 1) / 2. The returned done/info lists are fresh copies —
+        mutating them never touches the env's internal state.
+        """
         rewards: list[float] = []
+        prev_state = self.current_state
         self.current_state = []
         self.current_step += 1
 
-        # ── 1. Apply actions and integrate poses for live robots ──
+        # ── 1. Remap throttles, apply commands, integrate live poses ──
+        applied: list[tuple[float, float]] = []
         for i in range(self.n_robots):
             if self.episode_done[i]:
+                applied.append((0.0, 0.0))
                 continue
-            linear_vel, angular_vel = action[i]
+            throttle, angular_vel = float(action[i][0]), float(action[i][1])
+            linear_vel = (throttle + 1) / 2
+            applied.append((linear_vel, angular_vel))
             self.robots[i].set_velocity(linear_vel, angular_vel)
             self.robots[i].update_pose(self.time_delta)
 
         # ── 2. Observe, reward and settle termination per robot ──
         for i in range(self.n_robots):
-            self.current_state.append(self._get_state(i))
-
             if self.episode_done[i]:
-                rewards.append(0)
+                # ── Frozen robot: pose unchanged, keep the last state ──
+                self.current_state.append(prev_state[i])
+                rewards.append(0.0)
                 continue
+
+            self.current_state.append(self._get_state(i))
 
             collision = self.world.check_collision_robot(
                 self.robots[i].x,
@@ -555,15 +611,11 @@ class SimpleEnv:
                 or (self.current_step >= self.max_steps)
             )
 
-            min_laser_reading = (
-                float(min(self.robots[i].current_lidar_data))
-                if len(self.robots[i].current_lidar_data) > 0
-                else self.robots[i].lidar_max_range
-            )
+            min_laser_reading = float(min(self.robots[i].current_lidar_data))
             reward_i = self.get_reward(
                 target_reached,
                 collision,
-                action[i],
+                applied[i],
                 min_laser_reading,
             )
             self.cumulative_reward[i] += reward_i
@@ -575,16 +627,19 @@ class SimpleEnv:
                 "collision": collision,
             }
             self.info[i] = info_i
-            if self.current_step >= self.max_steps and not (
-                target_reached or collision
-            ):
-                info_i["reason"] = "max_steps_reached"
-            elif target_reached:
+            if target_reached:
                 info_i["reason"] = "target_reached"
             elif collision:
                 info_i["reason"] = "collision"
+            elif self.current_step >= self.max_steps:
+                info_i["reason"] = "max_steps_reached"
 
-        return self.current_state, rewards, self.episode_done, self.info
+        return (
+            self.current_state,
+            rewards,
+            list(self.episode_done),
+            list(self.info),
+        )
 
     @staticmethod
     def get_reward(
@@ -593,18 +648,21 @@ class SimpleEnv:
         action: Sequence[float] | np.ndarray,
         min_laser: float,
     ) -> float:
-        """+100 at the goal, -100 on any collision, shaped step otherwise."""
+        """+100 at the goal, -100 on any collision, shaped step otherwise.
+
+        `action` is the APPLIED command (v in [0, 1], omega in [-1, 1]); the
+        proximity penalty max(0, 1 - min_laser) kicks in once the nearest
+        body-relative reading drops below 1.
+        """
         if target:
             return 100.0
         if collision:
             return -100.0
 
-        # ── Proximity penalty: active once the nearest reading is < 1 ──
-        def r3(x: float) -> float:
-            return 1 - x if x < 1 else 0.0
-
         reward = (
-            float(action[0]) / 2 - abs(float(action[1])) / 2 - r3(min_laser)
+            float(action[0]) / 2
+            - abs(float(action[1])) / 2
+            - max(0.0, 1.0 - min_laser)
         )
         reward -= 0.05
         return reward

@@ -88,8 +88,9 @@ files — that is when the gate is real.
   downloads. Runs on every commit and in CI. Includes property-based tests
   (Hypothesis) asserting invariants, and tests written to kill specific mutants.
 - **Stage 2 (heavy)** — anything that downloads data/weights, needs a GPU, or
-  runs long. A `conftest.py` fixture **skips these unless `RUN_STAGE2=1`**, so
-  they are off by default and CI never triggers them.
+  runs long. A `conftest.py` skipif **marker** (apply it with `@stage2`)
+  **skips these unless `RUN_STAGE2=1`**, so they are off by default and the
+  per-push CI never triggers them.
 
 Run stage 1 (the default): `pytest`. Run stage 2 as well: `RUN_STAGE2=1 pytest`.
 
@@ -105,7 +106,9 @@ drops what can't be meaningfully exercised (`pragma: no cover`,
 - **Stage 1 (every push / PR)** — `pre-commit run --all-files` (lint, format,
   types, style checks) + `pytest`, on cheap runners with no hardware. Docs-only
   pushes are skipped (`paths-ignore`).
-- **Stage 2 (on demand)** — heavy tests on real hardware; not on every push.
+- **Stage 2 (on demand)** — `RUN_STAGE2=1 pytest` via the manual
+  `workflow_dispatch` job in `.github/workflows/stage2.yml`; not on every
+  push.
 
 CI invokes `pre-commit`, not the tools directly — one source of truth shared
 with local commits.

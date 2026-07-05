@@ -15,7 +15,6 @@ import os
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import json
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -23,8 +22,8 @@ from pathlib import Path
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
 from multiagent_navigation import viz
+from multiagent_navigation.lib import make_env
 from multiagent_navigation.config_schema import Config
-from multiagent_navigation.environment import SimpleEnv
 
 HERE = Path(__file__).parents[1]
 FIG = HERE / "figures"
@@ -58,21 +57,7 @@ def save(fig, name):
 
 def build_env(n_robots, seed):
     """A SimpleEnv from the package defaults with a seeded episode."""
-    random.seed(seed)
-    cfg = Config()
-    return SimpleEnv(
-        world_width=cfg.env.world_width,
-        world_height=cfg.env.world_height,
-        environment_dim=cfg.env.environment_dim,
-        robot_radius=cfg.env.robot_radius,
-        max_steps=cfg.env.max_steps,
-        n_robots=n_robots,
-        max_robots=cfg.env.max_robots,
-        time_delta=cfg.env.time_delta,
-        goal_reached_dist=cfg.env.goal_reached_dist,
-        lidar_max_range=cfg.env.lidar_max_range,
-        obstacle_definitions=[list(o) for o in cfg.env.obstacle_definitions],
-    )
+    return make_env(Config(), n_robots=n_robots, seed=seed)
 
 
 ########################################
@@ -254,10 +239,16 @@ def fig_architecture():
 
 
 def _moving_avg(a, k=9):
+    """Centred k-point moving average and the x-offset to plot it at.
+
+    Returns (smoothed, offset) so the caller aligns x as
+    `x[offset : offset + len(smoothed)]` for ANY k — including short logs,
+    where no smoothing is possible and the raw series comes back.
+    """
     if len(a) < k:
-        return a
+        return a, 0
     kernel = np.ones(k) / k
-    return np.convolve(a, kernel, mode="valid")
+    return np.convolve(a, kernel, mode="valid"), (k - 1) // 2
 
 
 def _curriculum_spans(epochs, counts):
@@ -309,9 +300,9 @@ def fig_learning_curve():
         linewidth=0.8,
         label="eval epoch",
     )
-    ma = _moving_avg(reward, 9)
+    ma, offset = _moving_avg(reward, 9)
     ax1.plot(
-        epochs[4 : 4 + len(ma)],
+        epochs[offset : offset + len(ma)],
         ma,
         color=ACCENT,
         linewidth=2.2,

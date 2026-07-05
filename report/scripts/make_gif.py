@@ -18,7 +18,6 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 import io
 import torch
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -29,6 +28,7 @@ from multiagent_navigation import viz
 from multiagent_navigation.agent import TD3
 from multiagent_navigation.config_schema import Config
 from multiagent_navigation.environment import Robot, SimpleEnv
+from multiagent_navigation.lib import make_env, load_agent, select_device
 
 SEED = 29
 N_ROBOTS = 4
@@ -51,27 +51,15 @@ MUTED = "#6b7896"
 ########################################
 
 
-def load_agent(cfg: Config, device: torch.device) -> TD3:
-    """Rebuild the network shell and load the report checkpoint."""
+def load_report_agent(cfg: Config, device: torch.device) -> TD3:
+    """The curated report checkpoint, with a friendly missing-file hint."""
     name = cfg.train.file_name
     if not (ASSETS / f"{name}_actor.pth").exists():
         raise SystemExit(
             f"missing checkpoint {ASSETS / name}_actor.pth — run "
             "`uv run python report/scripts/run_experiment.py` first",
         )
-
-    state_dim = cfg.env.environment_dim + 4
-    agent = TD3(
-        state_dim,
-        cfg.model.action_dim,
-        cfg.model.max_action,
-        device=device,
-        hidden1=cfg.model.hidden1,
-        hidden2=cfg.model.hidden2,
-    )
-    agent.load(name, ASSETS)
-    agent.actor.eval()
-    return agent
+    return load_agent(cfg, device, ASSETS)
 
 
 ########################################
@@ -92,17 +80,15 @@ def snapshot(env: SimpleEnv) -> list:
     ]
 
 
-def record_episode(agent: TD3, env: SimpleEnv, cfg: Config):
+def record_episode(agent: TD3, env: SimpleEnv):
     """Roll out one deterministic episode and record poses + scans."""
     state = env.reset(n_robots=N_ROBOTS)
     frames = [snapshot(env)]
 
-    # ── Shared policy per robot until every robot settles ──
+    # ── Batched shared policy until every robot settles; the env
+    #    remaps throttles itself ──
     while sum(env.episode_done) < env.n_robots:
-        action = np.zeros((env.n_robots, cfg.model.action_dim))
-        for i, robot_state in enumerate(state):
-            action[i] = agent.get_action(np.array(robot_state))
-        action[:, 0] = (action[:, 0] + 1) / 2
+        action = agent.get_actions(np.stack(state))
         state, _rewards, _dones, _infos = env.step(action)
         frames.append(snapshot(env))
 
@@ -211,37 +197,18 @@ def render_frame(fig, ax, cfg, meta, frames, k, episode, total):
 
 
 def main() -> None:
-    random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    device = torch.device(
-        os.environ.get(
-            "MAN_DEVICE",
-            "mps" if torch.backends.mps.is_available() else "cpu",
-        ),
-    )
+    device = select_device()
     cfg = Config()
-    agent = load_agent(cfg, device)
-
-    env = SimpleEnv(
-        world_width=cfg.env.world_width,
-        world_height=cfg.env.world_height,
-        environment_dim=cfg.env.environment_dim,
-        robot_radius=cfg.env.robot_radius,
-        max_steps=MAX_STEPS,
-        n_robots=N_ROBOTS,
-        max_robots=cfg.env.max_robots,
-        time_delta=cfg.env.time_delta,
-        goal_reached_dist=cfg.env.goal_reached_dist,
-        lidar_max_range=cfg.env.lidar_max_range,
-        obstacle_definitions=[list(o) for o in cfg.env.obstacle_definitions],
-    )
+    agent = load_report_agent(cfg, device)
+    env = make_env(cfg, n_robots=N_ROBOTS, max_steps=MAX_STEPS, seed=SEED)
 
     # ── Collect episodes where every robot reaches its goal ──
     episodes = []
     for _ in range(MAX_TRIES):
-        frames, outcomes, meta = record_episode(agent, env, cfg)
+        frames, outcomes, meta = record_episode(agent, env)
         if all(reason == "target_reached" for reason in outcomes):
             episodes.append((frames, meta))
             print(f"episode {len(episodes)}: arrived in {len(frames)} steps")

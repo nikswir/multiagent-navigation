@@ -268,9 +268,11 @@ non-stationary~\cite{tan1993}: the same action in the same observed state
 can succeed or fail depending on what the rest of the team does next. To
 soften this, training follows a \emph{robot-count
 curriculum}~\cite{bengio2009}: each episode draws its active robot count
-uniformly from $\{1, \dots, n_{\max}(t)\}$, where the cap $n_{\max}(t)$ grows
-linearly from $1$ to \CurriculumCap{} over the first $8\times10^5$ of the
-$10^6$ training timesteps. Early training thus learns single-robot
+uniformly from $\{1, \dots, n_{\max}(t)\}$, where the cap
+$n_{\max}(t) = \min(8, \lfloor 1 + 8t/T_{\mathrm{ramp}} \rfloor)$ grows
+stepwise from $1$, reaching \CurriculumCap{} at $7\times10^5$ of the $10^6$
+training timesteps ($T_{\mathrm{ramp}} = 8\times10^5$). Early training thus
+learns single-robot
 navigation on a quiet map; multi-robot interference is introduced only once
 the basic competence exists.
 
@@ -371,10 +373,10 @@ The package ships a vector renderer (\texttt{viz.py}) with two faces. A
 live \texttt{FuncAnimation} viewer replays the best checkpointed epoch and
 dumps every robot's $24$-d observation per step to a CSV for offline
 analysis. The same module's drawing helpers (field, obstacles, per-robot
-goals, lidar fans, trajectories) back every figure in this report and an
-animated GIF of policy rollouts embedded in the repository README, so the
-paper and the live environment are guaranteed to agree. All figures are
-emitted as scalable PDF.
+goals, lidar fans, trajectories) back every figure in this report, and the
+repository ships a script that renders policy rollouts into an animated GIF
+for the README, so the paper and the live environment are guaranteed to
+agree. All figures are emitted as scalable PDF.
 
 \section{Conclusion and Future Work}
 We presented a complete multi-robot navigation agent: a single TD3 policy,

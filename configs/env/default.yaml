@@ -1,4 +1,6 @@
-# An `env` option — must satisfy EnvConfig in config_schema.py.
+# An `env` option — must satisfy EnvConfig in config_schema.py, and these
+# defaults must stay EQUAL to the schema's (test_config_sync pins it, so the
+# two sources can never drift silently).
 # max_robots is the env's array CAPACITY; the active robot count per episode
 # comes from train.n_robots (curriculum cap) or animate.n_robots.
 world_width: 10.0

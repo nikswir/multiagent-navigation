@@ -11,7 +11,6 @@ and written into Hydra's per-run output directory, so repeated runs and
 
 from __future__ import annotations
 
-import torch
 import hydra
 
 from typing import cast
@@ -21,7 +20,7 @@ from hydra.core.hydra_config import HydraConfig
 
 from multiagent_navigation import config_schema
 from multiagent_navigation.config_schema import Config
-from multiagent_navigation.lib import train, TrainResult
+from multiagent_navigation.lib import train, TrainResult, select_device
 
 # Register the structured-config schema so Hydra type-checks the composed YAML.
 config_schema.register()
@@ -34,7 +33,7 @@ config_schema.register()
 def run(cfg: Config, out_dir: Path) -> TrainResult:
     """Train from the composed config, writing artifacts under `out_dir`."""
     # ── Pick the device once; the library stays device-agnostic ──
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = select_device()
     return train(
         cfg,
         device=device,

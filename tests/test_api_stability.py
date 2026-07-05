@@ -18,15 +18,22 @@ PKG = importlib.import_module("multiagent_navigation")
 
 
 def test_exports() -> None:
-    """`__all__` is exactly the supported public surface."""
+    """`__all__` is exactly the supported public surface.
+
+    Deliberately extended (with the 0.2.0 bump) by the shared builders:
+    `make_env`, `build_agent` and `select_device`.
+    """
     assert set(PKG.__all__) == {
         "TD3",
         "train",
         "Config",
         "evaluate",
+        "make_env",
         "SimpleEnv",
         "TrainResult",
+        "build_agent",
         "ReplayBuffer",
+        "select_device",
     }
 
 

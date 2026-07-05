@@ -1,12 +1,14 @@
-# A `train` option — must satisfy TrainConfig in config_schema.py.
-# expl_noise is the INITIAL exploration noise: it decays at runtime toward
+# A `train` option — must satisfy TrainConfig in config_schema.py, and these
+# defaults must stay EQUAL to the schema's (test_config_sync pins it, so the
+# two sources can never drift silently).
+# expl_noise is the INITIAL exploration noise: it anneals linearly to
 # expl_min over expl_decay_steps. n_robots is the curriculum's active-robot
 # cap, reached after max_robots_timestamp timesteps (env capacity stays 16).
+# Episode length is owned by the env (env.max_steps).
 seed: 10
 max_timesteps: 1000000
 eval_freq: 5000
 eval_ep: 100
-max_ep: 500
 expl_noise: 1.0
 expl_min: 0.1
 expl_decay_steps: 500000

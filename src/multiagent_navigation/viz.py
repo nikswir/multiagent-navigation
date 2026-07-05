@@ -3,12 +3,14 @@
 Loads the best epoch recorded in the training results log (the same
 `{results_dir}/{file_name}` / `{models_dir}/{file_name}_epoch-{epoch}`
 contract `lib.train` writes), replays the shared policy for
-`cfg.animate.n_robots` robots with matplotlib's FuncAnimation, and dumps every
-robot's 24-d state per step to a CSV report (consumed by
-`notebooks/develop.ipynb`). The module-level `draw_*` helpers render the same
-scene as static vector graphics for the report figure scripts
-(`report/scripts/`). Matplotlib is imported at module load, so the training
-path (`agent`, `lib`, `run`) never imports this module. Run it as::
+`cfg.animate.n_robots` robots with matplotlib's FuncAnimation, and dumps
+every robot's 24-d state per step to a CSV report. The run to replay is
+resolved by `resolve_run_dirs`: an explicit `animate.run_dir`, else the
+CWD-relative `animate.results_dir`, else the newest Hydra `outputs/` run.
+The module-level `draw_*` helpers render the same scene as static vector
+graphics for the report figure scripts (`report/scripts/`). Matplotlib is
+imported at module load, so the training path (`agent`, `lib`, `run`) never
+imports this module. Run it as::
 
     python -m multiagent_navigation.viz                  # animate best epoch
     python -m multiagent_navigation.viz animate.n_robots=4
@@ -20,7 +22,6 @@ import json
 import math
 import hydra
 import torch
-import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -40,6 +41,7 @@ from multiagent_navigation.agent import TD3
 from multiagent_navigation import config_schema
 from multiagent_navigation.config_schema import Config
 from multiagent_navigation.environment import Robot, SimpleEnv
+from multiagent_navigation.lib import make_env, build_agent, select_device
 
 # Register the structured-config schema so Hydra type-checks the composed YAML.
 config_schema.register()
@@ -193,15 +195,8 @@ def draw_robot(
 def draw_lidar(ax: Axes, robot: Robot) -> None:
     """The robot's latest lidar fan, one faint ray per beam."""
     for j, dist in enumerate(robot.current_lidar_data_display):
-        # ── Reconstruct the beam angle exactly as the scan cast it ──
-        if robot.lidar_num_beams == 1:
-            relative = robot.lidar_start_angle_offset + 0.5 * robot.lidar_fov
-        else:
-            relative = (
-                robot.lidar_start_angle_offset
-                + (j / (robot.lidar_num_beams - 1)) * robot.lidar_fov
-            )
-        angle = robot.theta + relative
+        # ── The beam angle comes from the scan's own formula ──
+        angle = robot.theta + robot.beam_angle(j)
 
         ax.plot(
             [robot.x, robot.x + dist * math.cos(angle)],
@@ -290,12 +285,45 @@ def render_env(
 ########################################
 
 
-def load_best_network(cfg: Config, device: torch.device) -> TD3:
-    """Rebuild the agent and load the best epoch from the training log."""
+def resolve_run_dirs(cfg: Config) -> tuple[Path, Path]:
+    """(results_dir, models_dir) of the training run to replay.
 
-    # ── Pick the epoch with the highest average evaluation reward ──
-    log_path = Path(cfg.animate.results_dir) / cfg.train.file_name
-    with open(log_path) as fh:
+    Priority: an explicit `animate.run_dir`; else the CWD-relative
+    `animate.results_dir` when the log exists there (the repo-root layout
+    `report/scripts/run_experiment.py` writes); else the newest Hydra
+    `outputs/<date>/<time>` run that contains the log. Fails with a clear
+    error instead of silently replaying the wrong artifact.
+    """
+    if cfg.animate.run_dir:
+        run = Path(cfg.animate.run_dir)
+        return run / "results", run / "pytorch_models"
+
+    results = Path(cfg.animate.results_dir)
+    if (results / cfg.train.file_name).exists():
+        return results, Path(cfg.animate.models_dir)
+
+    candidates = sorted(
+        Path("outputs").glob(f"*/*/results/{cfg.train.file_name}"),
+    )
+    if candidates:
+        run = candidates[-1].parents[1]
+        print(f"Replaying the newest training run: {run}")
+        return run / "results", run / "pytorch_models"
+
+    raise FileNotFoundError(
+        f"no training log '{cfg.train.file_name}' found in "
+        f"'{results}' or under 'outputs/' — train first, or point "
+        f"animate.run_dir at a run directory",
+    )
+
+
+def load_best_network(cfg: Config, device: torch.device) -> TD3:
+    """Rebuild the agent and load the best epoch from the training log.
+
+    "Best" is the epoch with the highest `Avg_reward` in the results log.
+    """
+    results_dir, models_dir = resolve_run_dirs(cfg)
+    with open(results_dir / cfg.train.file_name) as fh:
         train_report = json.load(fh)
     best = max(train_report, key=lambda e: e["Avg_reward"])
     print(
@@ -306,19 +334,10 @@ def load_best_network(cfg: Config, device: torch.device) -> TD3:
     )
 
     # ── Rebuild the network shell and load the epoch checkpoint ──
-    state_dim = cfg.env.environment_dim + 4
-    network = TD3(
-        state_dim,
-        cfg.model.action_dim,
-        cfg.model.max_action,
-        device=device,
-        hidden1=cfg.model.hidden1,
-        hidden2=cfg.model.hidden2,
-    )
-    epoch = best["Epoch"]
+    network = build_agent(cfg, device)
     network.load(
-        f"{cfg.train.file_name}_epoch-{epoch}",
-        directory=cfg.animate.models_dir,
+        f"{cfg.train.file_name}_epoch-{best['Epoch']}",
+        directory=models_dir,
     )
     return network
 
@@ -353,9 +372,11 @@ class SceneAnimator:
         self.title_text: Text | None = None
         self.animation: FuncAnimation | None = None
 
-        # ── One row per step, one column per robot state feature ──
+        # ── One row per step, one column per robot state feature; rows
+        #    are collected in a list and framed once at save time ──
         self.state_dim = env.robots[0].lidar_num_beams + 4
-        self.report = pd.DataFrame(columns=report_columns(env))
+        self.report_rows: list[np.ndarray] = []
+        self.report_saved = False
 
     def init_frame(self) -> list[Artist]:
         """Reset the episode and (re)build every artist from scratch."""
@@ -432,25 +453,12 @@ class SceneAnimator:
         """One animation tick: act, step the env, redraw, log the state."""
         env = self.env
 
-        # ── 1. Query the policy per robot (throttle remapped to [0,1]) ──
-        actions: list[list[float]] = []
-        for i in range(env.n_robots):
-            if env.episode_done[i]:
-                actions.append([0, 0])
-                continue
-            current_state = env.current_state[i]
-            action = self.network.get_action(np.array(current_state))
-            a_in = [(action[0] + 1) / 2, action[1]]
-            actions.append(a_in)
+        # ── 1. One batched policy query; the env remaps throttles ──
+        actions = self.network.get_actions(np.stack(env.current_state))
+        state, _rewards, _dones, _infos = env.step(actions)
 
-        state, rewards, dones, infos = env.step(actions)
-
-        # ── 2. Log every robot's state row into the report ──
-        for i, st in enumerate(state):
-            cols = self.report.columns[
-                i * self.state_dim : (i + 1) * self.state_dim
-            ]
-            self.report.loc[env.current_step, cols] = st
+        # ── 2. Log every robot's state into this step's report row ──
+        self.report_rows.append(np.concatenate(state))
 
         # ── 3. Move the robot / goal artists; redraw robot 0's lidar ──
         for i in range(env.n_robots):
@@ -486,10 +494,22 @@ class SceneAnimator:
                 f"Episode ended by FuncAnimation. Reason: {reasons}, "
                 f"Total Reward: {total_reward}",
             )
-            self.report.to_csv(self.report_csv, index=False)
+            self.save_report()
             self.animation.event_source.stop()
 
         return self._artists()
+
+    def save_report(self) -> None:
+        """Write the per-step state CSV once — also called on early close,
+        so an interrupted animation still leaves its report behind."""
+        if self.report_saved or not self.report_rows:
+            return
+        report = pd.DataFrame(
+            self.report_rows,
+            columns=report_columns(self.env),
+        )
+        report.to_csv(self.report_csv, index=False)
+        self.report_saved = True
 
     ########################################
     #           Drawing helpers            #
@@ -511,17 +531,8 @@ class SceneAnimator:
     def _draw_lidar(self, i: int) -> None:
         robot = self.env.robots[i]
         for j, dist in enumerate(robot.current_lidar_data_display):
-            # ── Reconstruct the beam angle exactly as the scan cast it ──
-            if robot.lidar_num_beams == 1:
-                relative_beam_angle = (
-                    robot.lidar_start_angle_offset + 0.5 * robot.lidar_fov
-                )
-            else:
-                relative_beam_angle = (
-                    robot.lidar_start_angle_offset
-                    + (j / (robot.lidar_num_beams - 1)) * robot.lidar_fov
-                )
-            global_beam_angle = robot.theta + relative_beam_angle
+            # ── The beam angle comes from the scan's own formula ──
+            global_beam_angle = robot.theta + robot.beam_angle(j)
 
             x_end = robot.x + dist * math.cos(global_beam_angle)
             y_end = robot.y + dist * math.sin(global_beam_angle)
@@ -554,6 +565,9 @@ class SceneAnimator:
         )
         plt.show()
 
+        # ── Window closed before the episode finished: still dump the CSV ──
+        self.save_report()
+
 
 ########################################
 #             Entry point              #
@@ -562,23 +576,14 @@ class SceneAnimator:
 
 def animate(cfg: Config, *, device: torch.device | None = None) -> None:
     """Build the env and best network from `cfg`, run the live animation."""
-
-    # ── Seed layout randomness for a reproducible scene ──
-    random.seed(cfg.animate.seed)
-
     dev = device if device is not None else torch.device("cpu")
-    env = SimpleEnv(
-        world_width=cfg.env.world_width,
-        world_height=cfg.env.world_height,
-        environment_dim=cfg.env.environment_dim,
-        robot_radius=cfg.env.robot_radius,
-        max_steps=cfg.animate.max_steps,
+
+    # ── The env owns its layout randomness — seeded for a stable scene ──
+    env = make_env(
+        cfg,
         n_robots=cfg.animate.n_robots,
-        max_robots=cfg.env.max_robots,
-        time_delta=cfg.env.time_delta,
-        goal_reached_dist=cfg.env.goal_reached_dist,
-        lidar_max_range=cfg.env.lidar_max_range,
-        obstacle_definitions=[list(o) for o in cfg.env.obstacle_definitions],
+        max_steps=cfg.animate.max_steps,
+        seed=cfg.animate.seed,
     )
     network = load_best_network(cfg, dev)
     animator = SceneAnimator(
@@ -598,8 +603,7 @@ def animate(cfg: Config, *, device: torch.device | None = None) -> None:
 )
 def main(cfg: DictConfig) -> None:
     # ── Pick the device once; the library stays device-agnostic ──
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    animate(cast(Config, cfg), device=device)
+    animate(cast(Config, cfg), device=select_device())
     print("Animation window closed or animation finished.")
 
 
