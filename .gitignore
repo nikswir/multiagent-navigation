@@ -28,7 +28,6 @@ multirun/
 # ML artifacts
 *.ckpt
 *.pt
-*.pth
 wandb/
 
 # Regenerable training outputs (curated copies live in report/assets/)

@@ -192,10 +192,9 @@ the same way: `MAN_DEVICE` override, else CUDA → MPS → CPU.
 
 Note: `.gitignore` excludes `*.pth` globally, so the curated checkpoint that
 `run_experiment.py` writes to `report/assets/` must be staged explicitly with
-`git add -f report/assets/*.pth`. The other curated assets are the real
-training logs: `TD3_simpleEnv.json` (the 8-robot run behind the figures and
-the Results table) and `TD3_simpleEnv_4robots.json` (an earlier 4-robot run
-that peaks at a 97 % arrival rate).
+`git add -f report/assets/*.pth`. The other curated asset is the real
+training log `TD3_simpleEnv.json` (the 8-robot run behind the figures and
+the Results table).
 
 ## Layout
 
