@@ -165,27 +165,26 @@ def render_frame(fig, ax, cfg, meta, frames, k, episode, total):
             viz.draw_lidar(ax, probe)
         viz.draw_robot(ax, x, y, theta, probe.radius, viz.COLORS[i])
 
-    # ── HUD on the field itself ──
-    ax.text(
-        -w / 2 + 0.25,
-        h / 2 - 0.3,
+    # ── HUD in its own strip ABOVE the field, never over the scene ──
+    fig.texts.clear()
+    fig.text(
+        0.03,
+        0.965,
         "TD3 shared policy on unseen episodes",
         color=INK,
         fontsize=11,
         fontweight="bold",
-        va="top",
-        zorder=9,
+        va="center",
     )
-    ax.text(
-        w / 2 - 0.25,
-        h / 2 - 0.3,
-        f"episode {episode:02d}/{total:02d} · step {k:03d}",
+    fig.text(
+        0.97,
+        0.965,
+        f"episode {episode}/{total} · step {k:3d}",
         color=MUTED,
         fontsize=9,
         family="monospace",
         ha="right",
-        va="top",
-        zorder=9,
+        va="center",
     )
 
     buf = io.BytesIO()
@@ -220,9 +219,10 @@ def main() -> None:
     if not episodes:
         raise SystemExit("no all-arrived episodes to animate")
 
-    # ── Re-render every episode into palette frames ──
-    fig, ax = plt.subplots(figsize=(6.0, 6.0))
-    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    # ── Re-render every episode into palette frames; the strip above the
+    #    axes hosts the HUD so it never overlaps the scene ──
+    fig, ax = plt.subplots(figsize=(6.0, 6.3))
+    fig.subplots_adjust(left=0, right=1, top=0.93, bottom=0)
     images = []
     for idx, (frames, meta) in enumerate(episodes, start=1):
         picks = list(range(0, len(frames), FRAME_STRIDE))

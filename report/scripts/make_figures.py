@@ -84,10 +84,10 @@ def fig_environment():
     ax.annotate(
         "goal",
         (gx, gy),
-        (gx + 0.4, gy + 0.8),
+        (gx - 0.5, gy - 0.9),
         color=GOOD,
         fontsize=10,
-        ha="left",
+        ha="right",
         va="center",
         arrowprops={"arrowstyle": "-", "color": GOOD, "lw": 0.8},
     )
@@ -312,7 +312,7 @@ def fig_learning_curve():
     ax1.set_xlabel("evaluation epoch (5000 timesteps each)")
     ax1.set_ylabel("mean per-robot return")
     ax1.set_title("Evaluation return (active robots shaded)")
-    ax1.legend(frameon=False, fontsize=9, loc="lower right")
+    ax1.legend(frameon=False, fontsize=9, loc="lower center")
     ax1.spines[["top", "right"]].set_visible(False)
 
     # ── Right: arrival / collision rates over the same curriculum ──
@@ -323,7 +323,7 @@ def fig_learning_curve():
     ax2.set_ylabel("per-robot rate (%)")
     ax2.set_title("Terminal outcomes (100 eval episodes)")
     ax2.set_ylim(0, 100)
-    ax2.legend(frameon=False, fontsize=9, loc="center right")
+    ax2.legend(frameon=False, fontsize=9, loc="center")
     ax2.spines[["top", "right"]].set_visible(False)
 
     fig.tight_layout()
