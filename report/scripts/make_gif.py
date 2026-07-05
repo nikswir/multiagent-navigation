@@ -158,9 +158,11 @@ def render_frame(fig, ax, cfg, meta, frames, k, episode, total):
         lidar_max_range=cfg.env.lidar_max_range,
     )
     for i, (x, y, theta, scan) in enumerate(frames[k]):
-        probe.x, probe.y, probe.theta = x, y, theta
-        probe.current_lidar_data_display = scan
-        viz.draw_lidar(ax, probe)
+        # ── One exemplar fan (robot 0) keeps the frame readable ──
+        if i == 0:
+            probe.x, probe.y, probe.theta = x, y, theta
+            probe.current_lidar_data_display = scan
+            viz.draw_lidar(ax, probe)
         viz.draw_robot(ax, x, y, theta, probe.radius, viz.COLORS[i])
 
     # ── HUD on the field itself ──

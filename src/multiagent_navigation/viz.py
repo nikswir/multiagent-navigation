@@ -243,7 +243,11 @@ def render_env(
     ax: Axes | None = None,
     show_lidar: bool = True,
 ) -> Axes:
-    """Draw the current scene: field, obstacles, goals and robots."""
+    """Draw the current scene: field, obstacles, goals and robots.
+
+    The lidar fan is drawn for robot 0 only — one exemplar keeps the scene
+    readable (every robot carries the same sensor).
+    """
     if ax is None:
         _, ax = plt.subplots(figsize=(6.4, 6.4))
 
@@ -266,7 +270,7 @@ def render_env(
             env.goal_reached_dist,
             color,
         )
-        if show_lidar:
+        if show_lidar and i == 0:
             draw_lidar(ax, env.robots[i])
         draw_robot(
             ax,
