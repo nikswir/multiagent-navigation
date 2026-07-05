@@ -15,8 +15,9 @@ navigate alone and then to share the world.
   <img src="docs/assets/demo.gif" alt="Trained policy: four robots navigating to their goals" width="560">
 </p>
 
-*The trained shared policy on unseen episodes: four robots (colored discs
-with lidar fans) heading to their matching-colored goals. The GIF is
+*The trained shared policy on unseen episodes: four robots (colored discs)
+heading to their matching-colored goals; the orange lidar fan is drawn for
+one robot for readability — every robot carries the same sensor. The GIF is
 rebuilt from the published checkpoint by `report/scripts/make_gif.py` —
 see [Reproduce the experiment](#reproduce-the-experiment).*
 
