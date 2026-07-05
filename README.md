@@ -85,31 +85,22 @@ where the $d_{\min}$ term penalizes closing in on the nearest lidar reading.
 
 ## Results
 
-All numbers come from the curated evaluation log of the training run
-([report/assets/TD3_simpleEnv.json](report/assets/TD3_simpleEnv.json): 199
-epochs, one per ~5000 timesteps, each averaging 100 deterministic evaluation
-episodes; the evaluation robot count follows the curriculum). Per-robot
-rates:
+The published checkpoint in [model/](model/) — the best 8-robot epoch of
+the training run, selected by early stopping on the evaluation log
+([report/assets/TD3_simpleEnv.json](report/assets/TD3_simpleEnv.json)) —
+drives all 8 robots at once. Per-robot rates over 100 deterministic
+episodes:
 
-| Checkpoint / window                      | Robots | Arrived    | Collision | Timeout |
-| ---------------------------------------- | ------ | ---------- | --------- | ------- |
-| published checkpoint (epoch 142)          | 8      | **92.4 %** | 4.0 %     | 3.6 %   |
-| — re-evaluated on 100 fresh episodes      | 8      | **90.0 %** | 6.8 %     | 3.3 %   |
-| single-robot-skill peak (epoch 56)        | 3      | **96.7 %** | 1.7 %     | 1.7 %   |
-| final 20 epochs (mean — no early stop)    | 8      | 63.2 %     | 36.3 %    | 0.5 %   |
+| Evaluation                        | Robots | Arrived    | Collision | Timeout |
+| --------------------------------- | ------ | ---------- | --------- | ------- |
+| training evaluation (epoch 142)   | 8      | **92.4 %** | 4.0 %     | 3.6 %   |
+| 100 fresh episodes (`eval_policy`) | 8      | **90.0 %** | 6.8 %     | 3.3 %   |
 
-The published weights in [model/](model/) are the best 8-robot epoch (142,
-~710k timesteps) — an **early stop**. Training past ~780k steps degrades the
-policy (last row): arrivals slide from 92 % toward ~58 % while collisions
-climb above 40 %, and timeouts stay near zero throughout — the swarm never
-forgets how to reach goals, it forgets how to be careful. The mechanism is
-classic off-policy drift: by then the 600k-transition replay buffer has
-turned over to recent, high-skill experience, so the critic stops seeing
-what risky manoeuvres cost while the speed-rewarding shaping keeps pushing
-for faster, more aggressive driving. This is exactly why every epoch is
-checkpointed and the shipped model is selected from the evaluation log.
-(The live replay tool picks its "best" epoch by average evaluation reward,
-which favours the easier early-curriculum phases — epoch 56 in this log.)
+Training *past* the published epoch makes the policy worse, not better —
+arrivals slide toward ~58 % as collisions climb (classic off-policy
+replay-buffer drift; timeouts stay near zero throughout). The learning
+dynamics, the curriculum study and the full degradation analysis are in
+the report.
 
 ![Training curves](report/figures/learning_curve.png)
 

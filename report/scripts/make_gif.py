@@ -35,10 +35,10 @@ N_ROBOTS = 4
 N_EPISODES = 5
 MAX_STEPS = 200
 MAX_TRIES = 200
-FRAME_STRIDE = 4
-HOLD_LAST = 6
-FRAME_MS = 110
-DPI = 90
+FRAME_STRIDE = 3
+HOLD_LAST = 8
+FRAME_MS = 90
+DPI = 120
 
 OUT = Path(__file__).parents[2] / "docs" / "assets" / "demo.gif"
 MODEL_DIR = Path(__file__).parents[2] / "model"
