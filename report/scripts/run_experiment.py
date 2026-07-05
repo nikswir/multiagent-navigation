@@ -71,7 +71,7 @@ def main() -> None:
     # ── Curated copies for the report pipeline (checkpoints + log) ──
     result.agent.save(cfg.train.file_name, ASSETS)
     log_path = ASSETS / f"{cfg.train.file_name}.json"
-    log_path.write_text(json.dumps(result.evaluations))
+    log_path.write_text(json.dumps(result.evaluations) + "\n")
     print(f"saved final checkpoint + {len(result.evaluations)} eval epochs")
 
     if result.evaluations:
@@ -91,7 +91,7 @@ def main() -> None:
     # ── One greedy trajectory for the report's failure figure ──
     env = make_env(cfg, n_robots=N_TRAJ_ROBOTS, seed=SEED)
     traj = greedy_rollout(result.agent, env, n_robots=N_TRAJ_ROBOTS)
-    (ASSETS / "trajectory.json").write_text(json.dumps(traj))
+    (ASSETS / "trajectory.json").write_text(json.dumps(traj) + "\n")
     outcomes = [robot["outcome"] for robot in traj["robots"]]
     print(f"greedy rollout outcomes: {outcomes}")
 

@@ -44,26 +44,39 @@
 % ---- experiment numbers (computed from report/assets/TD3_simpleEnv.json) ----
 % Computation (python3):
 %   import json, statistics as st
-%   d = json.load(open("report/assets/TD3_simpleEnv.json"))   # 174 epochs
-%   w = d[-20:]                                               # 8-robot window
-%   st.mean(e["Avg_arrived"]   for e in w)  -> 0.6737
-%   st.mean(e["Avg_collision"] for e in w)  -> 0.3172
-%   st.mean(e["Avg_timeout"]   for e in w)  -> 0.0091
-%   st.mean(e["Avg_reward"]    for e in w)  -> -8.97
-%   st.mean(e["Avg_reward"]    for e in d[:10]) -> -251.8
-%   max(d, key=lambda e: e["Avg_arrived"])  -> epoch 46, 3 robots,
-%                                              arrived 0.8367, collision 0.0667
-\newcommand{\NumEpochs}{174}
+%   d = json.load(open("report/assets/TD3_simpleEnv.json"))   # 199 epochs
+%   w = d[-20:]                                               # late 8-robot window
+%   st.mean(e["Avg_arrived"]   for e in w)  -> 0.6321
+%   st.mean(e["Avg_collision"] for e in w)  -> 0.3631
+%   st.mean(e["Avg_timeout"]   for e in w)  -> 0.0048
+%   st.mean(e["Avg_reward"]    for e in w)  -> +13.1
+%   st.mean(e["Avg_reward"]    for e in d[:10]) -> -66.9
+%   d[141] (epoch 142, best 8-robot epoch, the published checkpoint):
+%     arrived 0.9237, collision 0.0400, timeout 0.0363
+%   d[55]  (epoch 56, best epoch overall, 3 robots):
+%     arrived 0.9667, collision 0.0167
+%   fresh re-evaluation of the published checkpoint
+%   (report/scripts/eval_policy.py -> report/assets/eval_stats.json):
+%     100 episodes x 8 robots: arrived 720/800 = 0.900,
+%     collision 54/800 = 0.068, timeout 26/800 = 0.033
+\newcommand{\NumEpochs}{199}
 \newcommand{\CurriculumCap}{8}
-\newcommand{\LateArrived}{67.4\%}
-\newcommand{\LateCollision}{31.7\%}
-\newcommand{\LateTimeout}{0.9\%}
-\newcommand{\LateReturn}{$-$9.0}
-\newcommand{\EarlyReturn}{$-$252}
-\newcommand{\BestArrived}{83.7\%}
-\newcommand{\BestCollision}{6.7\%}
-\newcommand{\BestEpoch}{46}
-\newcommand{\BestRobots}{3}
+\newcommand{\LateArrived}{63.2\%}
+\newcommand{\LateCollision}{36.3\%}
+\newcommand{\LateTimeout}{0.5\%}
+\newcommand{\LateReturn}{$+$13.1}
+\newcommand{\EarlyReturn}{$-$67}
+\newcommand{\BestArrived}{92.4\%}
+\newcommand{\BestCollision}{4.0\%}
+\newcommand{\BestEpoch}{142}
+\newcommand{\BestRobots}{8}
+\newcommand{\PeakArrived}{96.7\%}
+\newcommand{\PeakCollision}{1.7\%}
+\newcommand{\PeakEpoch}{56}
+\newcommand{\PeakRobots}{3}
+\newcommand{\FreshArrived}{90.0\%}
+\newcommand{\FreshCollision}{6.8\%}
+\newcommand{\FreshTimeout}{3.3\%}
 
 \title{\vspace{-1.2cm}\bfseries Multi-Robot Navigation with a Shared
 Twin-Delayed DDPG Policy and a Robot-Count Curriculum}
@@ -86,11 +99,14 @@ under full parameter sharing: a single actor--critic pair is trained on the
 pooled transitions of all robots and executed independently by each of them.
 Because the multi-agent environment is non-stationary from any single robot's
 perspective, we ramp the active robot count from $1$ to \CurriculumCap{} with
-a training curriculum. Over the final training window the deterministic
-shared policy brings \LateArrived{} of robots to their goals per episode with
-\CurriculumCap{} robots active; at \BestRobots{} robots the arrival rate
-peaks at \BestArrived{}, isolating inter-robot interference as the dominant
-failure mode.
+a training curriculum. The deterministic shared policy, selected by early
+stopping on the evaluation log (epoch \BestEpoch), brings \BestArrived{} of
+robots to their goals per episode with all \CurriculumCap{} robots active
+(\FreshArrived{} when re-evaluated on $100$ fresh episodes), peaking at
+\PeakArrived{} while \PeakRobots{} robots are active. Training past this
+point \emph{degrades} the policy — arrivals fall to \LateArrived{} as
+collisions climb — a late-training instability we analyse and attribute to
+replay-buffer turnover under a speed-rewarding shaping.
 \end{abstract}
 
 \section{Introduction}
@@ -323,18 +339,35 @@ counted per robot: \emph{arrived}, \emph{collision} or \emph{timeout}.
 
 \paragraph{Learning dynamics.}
 Figure~\ref{fig:lc} shows the training curves with the curriculum phases
-shaded. The mean per-robot return climbs from \EarlyReturn{} in the first
-ten epochs to around zero once single-robot navigation is mastered, and the
-arrival rate exceeds $80\%$ while $2$--$3$ robots are active — peaking at
-\BestArrived{} (collision rate \BestCollision) in epoch~\BestEpoch{} with
-\BestRobots{} robots. As the curriculum ramps toward \CurriculumCap{}
-robots, arrivals settle to \LateArrived{} and collisions grow to
-\LateCollision{} (mean over the final $20$ epochs; timeouts almost vanish
-at \LateTimeout), while the mean return stays near \LateReturn. The
-degradation tracks the robot count, not training time: navigation itself is
-learned early, and the remaining failures are dominated by robot--robot
-interference — mutual blocking and collisions between robots that each
-behave sensibly in isolation.
+shaded. The mean per-robot return climbs from \EarlyReturn{} over the first
+ten epochs to strongly positive once single-robot navigation is mastered;
+the arrival rate reaches \PeakArrived{} (collision rate \PeakCollision) in
+epoch~\PeakEpoch{} while \PeakRobots{} robots are active, and the policy
+carries this skill into the full \CurriculumCap-robot phase almost intact:
+its first ten \CurriculumCap-robot epochs average $89.6\%$ arrivals, peaking
+at \BestArrived{} (collision rate \BestCollision) in epoch~\BestEpoch{},
+about $7 \times 10^5$ timesteps in. Epoch~\BestEpoch{} is the checkpoint we
+publish; re-evaluated on $100$ freshly sampled \CurriculumCap-robot
+episodes it delivers \FreshArrived{} arrivals (\FreshCollision{} collisions,
+\FreshTimeout{} timeouts).
+
+\paragraph{Late-training degradation.}
+Training \emph{past} that point makes the policy worse, not better: over the
+final $20$ epochs — all at a fixed $n = \CurriculumCap$ — arrivals average
+only \LateArrived{} while collisions average \LateCollision{}, and the last
+epochs fall below $60\%$. Two observations localise the cause. First,
+timeouts stay near zero throughout (\LateTimeout{} late-window mean): the
+swarm never loses the ability to reach goals, it loses caution — failures
+convert almost one-for-one into collisions. Second, the slide starts only
+after ${\sim}7.8 \times 10^5$ timesteps, by which point the
+$6 \times 10^5$-transition replay buffer (multiple transitions per
+timestep with many robots) has fully turned over to recent, high-skill
+experience: the critic no longer sees what risky manoeuvres cost, while the
+$+v/2$ speed term keeps rewarding faster driving, pushing the co-adapting
+robots into an aggressive, collision-prone regime. Per-epoch checkpointing
+plus selection on the evaluation log — early stopping — is the remedy this
+pipeline builds in; larger buffers, a lower discount or a decaying learning
+rate are the natural mitigations left to future work.
 
 \begin{figure}[H]
   \centering
@@ -347,26 +380,24 @@ behave sensibly in isolation.
 \end{figure}
 
 \paragraph{Interference, not incompetence.}
-The same policy that delivers \BestArrived{} of robots at
-$n=\BestRobots$ delivers \LateArrived{} at $n=\CurriculumCap$, with the
-difference absorbed almost entirely by the collision rate
-(\BestCollision{} $\to$ \LateCollision). Since finished robots freeze in
-place and remain lidar-visible, late-episode worlds are also more cluttered
-than the obstacle course alone. This isolates coordination — not
-single-robot skill — as the binding constraint, which parameter sharing
-alone does not resolve: the robots share competence but not intent.
+At its selected checkpoint the policy loses only a few points when the world
+fills up: \PeakArrived{} of robots arrive at $n=\PeakRobots$ versus
+\BestArrived{} at $n=\CurriculumCap$, with the gap absorbed almost entirely
+by the collision rate (\PeakCollision{} $\to$ \BestCollision). Since
+finished robots freeze in place and remain lidar-visible, late-episode
+worlds are also more cluttered than the obstacle course alone. Both the
+residual gap and the late-training collapse point the same way: coordination
+— not single-robot skill — is the binding constraint, and parameter sharing
+alone does not resolve it: the robots share competence but not intent.
 
-% The success/failure trajectory pair is produced by the documented pipeline
-% (run_experiment.py -> eval_policy.py -> make_figures.py); uncomment once
-% report/assets/trajectory*.json exist and the figure is regenerated:
-% \begin{figure}[H]
-%   \centering
-%   \includegraphics[width=0.98\linewidth]{trajectory.pdf}
-%   \caption{The deterministic shared policy on unseen episodes. Left: every
-%   robot reaches its goal. Right: a characteristic failure — two paths cross
-%   and a robot collides.}
-%   \label{fig:traj}
-% \end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.98\linewidth]{trajectory.pdf}
+  \caption{The deterministic shared policy on unseen episodes. Left: every
+  robot reaches its goal. Right: a characteristic failure — paths cross
+  and a robot collides.}
+  \label{fig:traj}
+\end{figure}
 
 \section{Visualisation}
 The package ships a vector renderer (\texttt{viz.py}) with two faces. A
@@ -382,14 +413,18 @@ agree. All figures are emitted as scalable PDF.
 We presented a complete multi-robot navigation agent: a single TD3 policy,
 trained with parameter sharing on the pooled experience of a growing robot
 team, that navigates lidar-only robots to individual goals among obstacles.
-On real training data the shared policy masters single-robot navigation
-early (over $80\%$ arrivals at $2$--$3$ robots) and retains \LateArrived{}
-per-robot arrivals at the full \CurriculumCap-robot task, with robot--robot
-collisions as the dominant remaining failure mode. Natural next steps target
-exactly that gap: centralized critics with decentralized actors,
-inter-robot communication or attention over neighbouring robots, explicit
-collision-avoidance shaping between robots, prioritised replay, and
-randomising the obstacle course itself for cross-layout generalization.
+On real training data the shared policy masters navigation early
+(\PeakArrived{} arrivals at \PeakRobots{} robots) and, selected by early
+stopping, retains \BestArrived{} per-robot arrivals at the full
+\CurriculumCap-robot task (\FreshArrived{} on fresh episodes), with
+robot--robot collisions as the dominant remaining failure mode — both in
+the residual gap and in the late-training degradation that continued
+optimisation induces. Natural next steps target exactly these gaps:
+centralized critics with decentralized actors, inter-robot communication or
+attention over neighbouring robots, explicit collision-avoidance shaping
+between robots, larger or prioritised replay against the late-stage buffer
+turnover, and randomising the obstacle course itself for cross-layout
+generalization.
 
 \begin{thebibliography}{9}
 \bibitem{fujimoto2018} S.~Fujimoto, H.~van Hoof, and D.~Meger,

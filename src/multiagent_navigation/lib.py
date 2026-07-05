@@ -436,6 +436,7 @@ def train(
                     )
                 with open(results_path / cfg.train.file_name, "w") as fh:
                     json.dump(evaluations, fh)
+                    fh.write("\n")
                 epoch += 1
 
             state = env.reset(n_robots=draw_n_robots())

@@ -12,13 +12,13 @@ number of active robots up during training, so the policy first learns to
 navigate alone and then to share the world.
 
 <p align="center">
-  <img src="report/figures/environment.png" alt="Four robots navigating the SimpleEnv world" width="704">
+  <img src="docs/assets/demo.gif" alt="Trained policy: four robots navigating to their goals" width="560">
 </p>
 
-*One sampled episode: four robots (colored discs with lidar fans) heading to
-their matching-colored goals. An animated demo GIF (`docs/assets/demo.gif`)
-is produced by `report/scripts/make_gif.py` once a trained checkpoint exists
-— see [Reproduce the experiment](#reproduce-the-experiment).*
+*The trained shared policy on unseen episodes: four robots (colored discs
+with lidar fans) heading to their matching-colored goals. The GIF is
+rebuilt from the published checkpoint by `report/scripts/make_gif.py` —
+see [Reproduce the experiment](#reproduce-the-experiment).*
 
 ## The task
 
@@ -85,22 +85,30 @@ where the $d_{\min}$ term penalizes closing in on the nearest lidar reading.
 ## Results
 
 All numbers come from the curated evaluation log of the training run
-([report/assets/TD3_simpleEnv.json](report/assets/TD3_simpleEnv.json): 174
-epochs, one per 5000 timesteps, each averaging 100 deterministic evaluation
+([report/assets/TD3_simpleEnv.json](report/assets/TD3_simpleEnv.json): 199
+epochs, one per ~5000 timesteps, each averaging 100 deterministic evaluation
 episodes; the evaluation robot count follows the curriculum). Per-robot
 rates:
 
-| Training window                        | Robots | Arrived    | Collision | Timeout |
-| -------------------------------------- | ------ | ---------- | --------- | ------- |
-| best single epoch (46, by arrival)     | 3      | **83.7 %** | 6.7 %     | 9.7 %   |
-| final 20 epochs (mean)                 | 8      | **67.4 %** | 31.7 %    | 0.9 %   |
+| Checkpoint / window                      | Robots | Arrived    | Collision | Timeout |
+| ---------------------------------------- | ------ | ---------- | --------- | ------- |
+| published checkpoint (epoch 142)          | 8      | **92.4 %** | 4.0 %     | 3.6 %   |
+| — re-evaluated on 100 fresh episodes      | 8      | **90.0 %** | 6.8 %     | 3.3 %   |
+| single-robot-skill peak (epoch 56)        | 3      | **96.7 %** | 1.7 %     | 1.7 %   |
+| final 20 epochs (mean — no early stop)    | 8      | 63.2 %     | 36.3 %    | 0.5 %   |
 
-(The replay tool picks its "best" epoch by average evaluation reward —
-epoch 32 in this log; the table's headline row is the best epoch by arrival
-rate.) Navigation is mastered early — arrivals peak above 80 % while 2–3
-robots are active; the drop at 8 robots is absorbed almost entirely by
-robot–robot collisions — coordination, not navigation skill, is the binding
-constraint.
+The published weights in [model/](model/) are the best 8-robot epoch (142,
+~710k timesteps) — an **early stop**. Training past ~780k steps degrades the
+policy (last row): arrivals slide from 92 % toward ~58 % while collisions
+climb above 40 %, and timeouts stay near zero throughout — the swarm never
+forgets how to reach goals, it forgets how to be careful. The mechanism is
+classic off-policy drift: by then the 600k-transition replay buffer has
+turned over to recent, high-skill experience, so the critic stops seeing
+what risky manoeuvres cost while the speed-rewarding shaping keeps pushing
+for faster, more aggressive driving. This is exactly why every epoch is
+checkpointed and the shipped model is selected from the evaluation log.
+(The live replay tool picks its "best" epoch by average evaluation reward,
+which favours the easier early-curriculum phases — epoch 56 in this log.)
 
 ![Training curves](report/figures/learning_curve.png)
 
@@ -190,11 +198,15 @@ Set `MAN_DEVICE=cpu` to force the device (recommended on Apple Silicon) —
 every entry point (`run`, `viz` and the report scripts) resolves the device
 the same way: `MAN_DEVICE` override, else CUDA → MPS → CPU.
 
-Note: `.gitignore` excludes `*.pth` globally, so the curated checkpoint that
-`run_experiment.py` writes to `report/assets/` must be staged explicitly with
-`git add -f report/assets/*.pth`. The other curated asset is the real
-training log `TD3_simpleEnv.json` (the 8-robot run behind the figures and
-the Results table).
+Artifact layout: `run_experiment.py` writes per-epoch checkpoints to the
+run's `pytorch_models/` and curates the final + best-by-reward weights and
+the evaluation log into `report/assets/`. The **published** checkpoint —
+the one `eval_policy.py` and `make_gif.py` load — lives in
+[model/](model/): copy the epoch you select from the evaluation log there
+(currently epoch 142, the best 8-robot epoch; its training-eval metrics sit
+next to it in `epoch-142_metrics.json`). The curated training log
+`TD3_simpleEnv.json` in `report/assets/` is the data behind the figures and
+the Results table.
 
 ## Layout
 
