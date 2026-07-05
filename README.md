@@ -92,12 +92,15 @@ rates:
 
 | Training window                        | Robots | Arrived    | Collision | Timeout |
 | -------------------------------------- | ------ | ---------- | --------- | ------- |
-| best single epoch (46)                 | 3      | **83.7 %** | 6.7 %     | 9.7 %   |
+| best single epoch (46, by arrival)     | 3      | **83.7 %** | 6.7 %     | 9.7 %   |
 | final 20 epochs (mean)                 | 8      | **67.4 %** | 31.7 %    | 0.9 %   |
 
-Single-robot navigation is mastered early (>80 % arrivals at 2–3 robots);
-the drop at 8 robots is absorbed almost entirely by robot–robot collisions —
-coordination, not navigation skill, is the binding constraint.
+(The replay tool picks its "best" epoch by average evaluation reward —
+epoch 32 in this log; the table's headline row is the best epoch by arrival
+rate.) Navigation is mastered early — arrivals peak above 80 % while 2–3
+robots are active; the drop at 8 robots is absorbed almost entirely by
+robot–robot collisions — coordination, not navigation skill, is the binding
+constraint.
 
 ![Training curves](report/figures/learning_curve.png)
 
@@ -138,11 +141,14 @@ uv run python -m multiagent_navigation.run --cfg job
 uv run python -m multiagent_navigation.run --multirun train.seed=1,2,3
 ```
 
-Replay the best checkpointed epoch as a live animation (and dump a per-step
-state CSV):
+Replay the best checkpointed epoch (highest average evaluation reward) as a
+live animation, dumping a per-step state CSV. The run to replay is resolved
+automatically — a CWD-relative `results/` layout first, else the newest
+Hydra `outputs/` run — or pinned explicitly with `animate.run_dir`:
 
 ```bash
 uv run python -m multiagent_navigation.viz animate.n_robots=4
+uv run python -m multiagent_navigation.viz animate.run_dir=outputs/DATE/TIME
 ```
 
 ### Configuration groups
@@ -180,14 +186,16 @@ uv run python report/scripts/make_figures.py    # regenerate report figures
 uv run python report/scripts/make_gif.py        # rebuild the README demo GIF
 ```
 
-Set `MAN_DEVICE=cpu` to force the device (recommended on Apple Silicon).
+Set `MAN_DEVICE=cpu` to force the device (recommended on Apple Silicon) —
+every entry point (`run`, `viz` and the report scripts) resolves the device
+the same way: `MAN_DEVICE` override, else CUDA → MPS → CPU.
 
 Note: `.gitignore` excludes `*.pth` globally, so the curated checkpoint that
 `run_experiment.py` writes to `report/assets/` must be staged explicitly with
 `git add -f report/assets/*.pth`. The other curated assets are the real
 training logs: `TD3_simpleEnv.json` (the 8-robot run behind the figures and
 the Results table) and `TD3_simpleEnv_4robots.json` (an earlier 4-robot run
-that reaches a 91 % arrival rate).
+that peaks at a 97 % arrival rate).
 
 ## Layout
 

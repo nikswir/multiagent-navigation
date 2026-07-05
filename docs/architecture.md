@@ -37,7 +37,7 @@ graph TD
     end
 
     TRAIN --> ENV
-    TRAIN --> CURR["robot-count curriculum<br/>1 → n_robots over 400k steps"]
+    TRAIN --> CURR["robot-count curriculum<br/>1 → n_robots over the configured ramp"]
     TRAIN --> ACTOR
     TRAIN --> CRITIC
     TRAIN --> BUFFER
@@ -50,9 +50,10 @@ graph TD
 ## The flow
 
 - **`run.py`** is the CLI entry only — `@hydra.main` composes the config from
-  `configs/`, validates it against the typed schema, picks the device
-  (CUDA if available, else CPU) and routes both output dirs through Hydra's
-  per-run output directory. Importing the package never imports it.
+  `configs/`, validates it against the typed schema, picks the device via
+  `lib.select_device` (`MAN_DEVICE` override, else CUDA → MPS → CPU) and
+  routes both output dirs through Hydra's per-run output directory.
+  Importing the package never imports it.
 - **`config_schema.py`** declares the typed `Config`: the `env` group (world
   geometry, lidar, obstacle course, robot *capacity*), `model` (TD3 network
   sizes and update hyper-parameters), `train` (schedule, exploration decay,
